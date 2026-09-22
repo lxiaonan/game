@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<!-- inline, so the browser's automatic favicon request never 404s -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%90%BB%3C/text%3E%3C/svg%3E" />
+<title>熊二的世界 · 狗熊岭森林探索</title>
+<style>
+  :root {
+    --ink: #1d2716;
+    --card: rgba(18, 28, 16, 0.76);
+    --line: rgba(255, 214, 130, 0.55);
+    --amber: #ffd27a;
+    --amber-strong: #ffb02e;
+    --cream: #fff6dd;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0d140c; overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+    color: var(--cream);
+  }
+  #app { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  canvas#scene { display: block; width: 100%; height: 100%; }
+
+  /* One full screen overlay, not two: the grain is just another background layer.
+     The vignette used to be mix-blend-mode: multiply, which forces the compositor
+     to read back and re-blend the whole animating canvas every frame. Multiplying
+     by black is the same as drawing black with that alpha, so darkening with plain
+     black layers reproduces the old shading exactly, as an ordinary cheap layer. */
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    background:
+      radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 3px 3px,
+      radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 52%, rgba(0,0,0,0.42) 100%),
+      linear-gradient(to bottom, rgba(255,236,190,0.05), rgba(0,0,0,0.12));
+  }
+
+  /* ---------------- HUD ---------------- */
+  #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity .6s ease; }
+  #hud.on { opacity: 1; }
+
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    /* No backdrop-filter: six blurred panels over an animating canvas make the
+       compositor re-blur those regions every single frame. */
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+
+  .identity { position: absolute; left: 18px; top: 18px; display: flex; gap: 12px; align-items: center; padding: 10px 16px 10px 10px; }
+  .identity img { width: 62px; height: 62px; border-radius: 12px; object-fit: cover; border: 2px solid var(--line); background: #2a3a22; }
+  .identity .who { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+  .identity .role { font-size: 12px; opacity: .78; margin-top: 3px; }
+  .identity .role b { color: var(--amber); font-weight: 600; }
+
+  .quest { position: absolute; right: 18px; top: 18px; width: 254px; padding: 14px 16px 16px; }
+  .quest h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: .4px; color: var(--amber); font-weight: 700; }
+  .quest .count { font-size: 13px; opacity: .9; display: flex; justify-content: space-between; }
+  .quest .count strong { font-size: 17px; color: var(--cream); }
+  .bar { height: 8px; border-radius: 6px; background: rgba(0,0,0,0.42); margin: 9px 0 10px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0%; border-radius: 6px; background: linear-gradient(90deg, #ffb02e, #ffe9a8); transition: width .35s ease; }
+  .quest p { margin: 0; font-size: 12px; line-height: 1.55; opacity: .82; }
+
+  .tracker {
+    position: absolute; left: 50%; top: 62px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 9px; padding: 7px 15px; font-size: 13.5px;
+    opacity: 0; transition: opacity .3s ease;
+  }
+  .tracker.on { opacity: 1; }
+  .tracker .tri { display: inline-block; color: var(--amber-strong); font-size: 15px; line-height: 1; transition: transform .12s linear; }
+  .tracker .lbl { color: var(--cream); font-weight: 600; letter-spacing: .5px; }
+  .tracker .dst { color: var(--amber); font-variant-numeric: tabular-nums; }
+
+  .boss {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    width: 330px; padding: 12px 16px 13px; opacity: 0; transition: opacity .3s ease;
+  }
+  .boss.on { opacity: 1; }
+  .boss .row { display: flex; align-items: center; gap: 10px; }
+  .boss .row + .row { margin-top: 8px; }
+  .boss .nm { font-size: 12.5px; width: 58px; letter-spacing: .5px; color: var(--cream); }
+  .boss .hp { flex: 1; height: 9px; border-radius: 6px; background: rgba(0,0,0,0.45); overflow: hidden; display: block; }
+  .boss .hp b { display: block; height: 100%; width: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, #ff7a45, #ffca6a); transition: width .18s ease; }
+  .boss .hp.tree b { background: linear-gradient(90deg, #6fd06a, #d9f39a); }
+
+  .minimap { position: absolute; left: 18px; bottom: 18px; padding: 10px; }
+  .minimap canvas { display: block; border-radius: 10px; }
+  .minimap .cap { font-size: 11px; opacity: .7; margin-top: 7px; text-align: center; letter-spacing: 1px; }
+
+  .compass { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); padding: 6px 14px; font-size: 13px; letter-spacing: 2px; }
+  .compass b { color: var(--amber); }
+
+  #prompt {
+    position: absolute; left: 50%; bottom: 21%; transform: translateX(-50%);
+    padding: 10px 20px; font-size: 15px; letter-spacing: .5px;
+    opacity: 0; transition: opacity .22s ease, transform .22s ease;
+  }
+  #prompt.on { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+  #prompt kbd {
+    display: inline-block; min-width: 24px; text-align: center; padding: 2px 7px; margin: 0 4px;
+    border-radius: 6px; background: var(--amber); color: #3a2708; font-weight: 700; font-size: 13px;
+    font-family: inherit; box-shadow: 0 2px 0 rgba(0,0,0,.35);
+  }
+  #prompt em { font-style: normal; color: var(--amber); font-weight: 700; }
+
+  #toast {
+    position: absolute; left: 50%; top: 24%; transform: translate(-50%, -8px);
+    padding: 11px 22px; font-size: 15px; opacity: 0; transition: opacity .3s ease, transform .3s ease;
+  }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); }
+  #toast b { color: var(--amber-strong); }
+
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
+    border-radius: 50%; background: rgba(255,246,221,0.5); box-shadow: 0 0 0 1.5px rgba(0,0,0,0.25);
+  }
+
+  /* ---------------- dialogue ---------------- */
+  #dialogue {
+    position: fixed; left: 50%; bottom: 4%; transform: translate(-50%, 14px);
+    width: min(760px, 88vw); z-index: 8; padding: 16px 20px 14px;
+    opacity: 0; pointer-events: none; transition: opacity .22s ease, transform .22s ease;
+  }
+  #dialogue.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  #dialogue .head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  #dialogue .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+  #dialogue .name { font-weight: 700; color: var(--amber); font-size: 16px; letter-spacing: .6px; }
+  #dialogue .text { font-size: 16.5px; line-height: 1.7; min-height: 58px; }
+  #dialogue .foot { margin-top: 8px; font-size: 12px; opacity: .6; text-align: right; }
+
+  /* ---------------- screens ---------------- */
+  .screen {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(120,160,90,0.26), transparent 60%),
+      radial-gradient(ellipse at 78% 78%, rgba(255,170,60,0.15), transparent 62%),
+      linear-gradient(160deg, rgba(20,31,14,0.86) 0%, rgba(14,24,11,0.9) 55%, rgba(9,16,7,0.94) 100%);
+    backdrop-filter: blur(7px) saturate(1.05);
+    transition: opacity .6s ease, visibility .6s ease;
+  }
+  /* visibility: hidden, not just opacity: 0 — a fully transparent element with a
+     backdrop-filter still keeps a full screen blur render surface alive. */
+  .screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .screen .box { width: min(900px, 92vw); padding: 34px 38px 30px; text-align: center; }
+  .title { font-size: clamp(38px, 7vw, 76px); font-weight: 900; letter-spacing: 6px; margin: 0;
+    background: linear-gradient(180deg, #fff3cf, #ffb02e 70%, #d47a12);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 6px 26px rgba(255,150,30,0.28); }
+  .subtitle { margin: 10px 0 22px; font-size: 14.5px; letter-spacing: 4px; opacity: .82; }
+  .hero { display: flex; gap: 20px; align-items: center; justify-content: center; margin-bottom: 22px; flex-wrap: wrap; }
+  .hero .card { display: flex; align-items: center; gap: 14px; padding: 12px 18px 12px 12px; border-radius: 16px; }
+  .hero .card img { width: 92px; height: 92px; border-radius: 14px; object-fit: cover; border: 2px solid var(--line); }
+  .hero .card .t { text-align: left; }
+  .hero .card .t b { display: block; font-size: 22px; letter-spacing: 1px; }
+  .hero .card .t span { font-size: 12.5px; opacity: .78; line-height: 1.6; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; margin: 0 0 24px; }
+  .controls div { padding: 10px 12px; border-radius: 12px; font-size: 13px; display: flex; align-items: center; gap: 9px; }
+  .key { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 26px; padding: 0 8px;
+    border-radius: 7px; background: rgba(255,214,130,0.16); border: 1px solid var(--line); color: var(--amber); font-weight: 700; font-size: 12.5px; }
+  button.cta {
+    font-family: inherit; cursor: pointer; border: none; padding: 15px 52px; border-radius: 999px;
+    font-size: 19px; font-weight: 800; letter-spacing: 4px; color: #3a2506;
+    background: linear-gradient(180deg, #ffe6ae, #ffb02e);
+    box-shadow: 0 12px 30px rgba(255,160,40,0.35), inset 0 -3px 0 rgba(150,80,0,0.25);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  button.cta:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(255,160,40,0.45); }
+  button.cta:active { transform: translateY(1px); }
+  .foot-note { margin-top: 16px; font-size: 12px; opacity: .55; letter-spacing: .5px; }
+
+  #loading .box { max-width: 560px; }
+  #loading h2 { font-size: 22px; letter-spacing: 3px; margin: 0 0 18px; }
+  #loading .bar { height: 10px; margin-bottom: 12px; }
+  #loading .tip { font-size: 12.5px; opacity: .7; height: 18px; }
+
+  #win .box { max-width: 700px; }
+  #win h1 { font-size: 46px; letter-spacing: 6px; margin: 0 0 12px;
+    background: linear-gradient(180deg, #fff5d6, #ffb02e); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .screen p { color: var(--cream); text-shadow: 0 2px 10px rgba(0,0,0,0.45); }
+  #win p { font-size: 15.5px; line-height: 1.8; opacity: 1; font-weight: 500; margin: 0 0 22px; }
+  #win .stats { display: flex; gap: 14px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+  #win .stat { padding: 12px 20px; border-radius: 14px; min-width: 118px; }
+  #win .stat b { display: block; font-size: 24px; color: var(--amber); }
+  #win .stat span { font-size: 12px; opacity: .75; }
+
+  /* ---------------- touch ---------------- */
+  #touch { position: fixed; inset: 0; z-index: 6; display: none; pointer-events: none; }
+  #touch.on { display: block; }
+  #stick { position: absolute; left: 26px; bottom: 26px; width: 132px; height: 132px; border-radius: 50%;
+    background: rgba(20,30,18,0.35); border: 1px solid var(--line); pointer-events: auto; }
+  #stick i { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+    border-radius: 50%; background: rgba(255,214,130,0.55); }
+  .tbtn { position: absolute; width: 78px; height: 78px; border-radius: 50%; pointer-events: auto;
+    display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700;
+    background: rgba(20,30,18,0.45); border: 1px solid var(--line); color: var(--cream); }
+  #btn-use { right: 34px; bottom: 42px; }
+  #btn-jump { right: 124px; bottom: 108px; }
+
+  @media (max-width: 720px) {
+    .quest { width: 190px; padding: 10px 12px 12px; }
+    .quest p { display: none; }
+    .identity .role { display: none; }
+    .minimap canvas { width: 116px; height: 116px; }
+    #dialogue { bottom: 12%; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <div class="vignette"></div>
+
+  <div id="hud">
+    <div id="crosshair"></div>
+    <div class="panel identity">
+      <img id="portrait" alt="熊二" src="assets/tex/portrait_xionger.png" />
+      <div>
+        <div class="who">熊二</div>
+        <div class="role">狗熊岭 · <b>森林探索者</b></div>
+      </div>
+    </div>
+
+    <div class="panel quest">
+      <h3 id="q-title">新手任务 · 阻止光头强</h3>
+      <div class="count"><span id="q-label">进度</span><span><strong id="q-now">0</strong> / <span id="q-total">7</span></span></div>
+      <div class="bar"><i id="q-bar"></i></div>
+      <p id="q-hint">走进营地找熊大,他有急事找你。</p>
+    </div>
+
+    <div class="panel compass"><b id="c-dir">北</b> <span id="c-pos">0, 0</span></div>
+    <div class="panel tracker" id="tracker">
+      <span class="tri" id="tr-tri">▲</span>
+      <span class="lbl" id="tr-label">目标</span>
+      <span class="dst" id="tr-dist">0m</span>
+    </div>
+    <div class="panel boss" id="boss">
+      <div class="row"><span class="nm">光头强</span><i class="hp"><b id="b-hp"></b></i></div>
+      <div class="row"><span class="nm">大树</span><i class="hp tree"><b id="t-hp"></b></i></div>
+    </div>
+
+    <div class="panel minimap">
+      <canvas id="map" width="352" height="352" style="width:176px;height:176px"></canvas>
+      <div class="cap">狗熊岭地图</div>
+    </div>
+
+    <div class="panel" id="prompt"><kbd>E</kbd> 和 <em id="prompt-name">熊大</em> 说话</div>
+    <div class="panel" id="toast"></div>
+  </div>
+
+  <div class="panel" id="dialogue">
+    <div class="head"><span class="dot"></span><span class="name" id="d-name">熊大</span></div>
+    <div class="text" id="d-text"></div>
+    <div class="foot">按 <b>E</b> / 点击 继续</div>
+  </div>
+
+  <div id="touch">
+    <div id="stick"><i></i></div>
+    <div class="tbtn" id="btn-use">说话</div>
+    <div class="tbtn" id="btn-jump">跳</div>
+    <div class="tbtn" id="btn-hit">拍</div>
+  </div>
+
+  <div class="screen" id="loading">
+    <div class="box panel">
+      <h2>正在唤醒狗熊岭…</h2>
+      <div class="bar"><i id="load-bar"></i></div>
+      <div class="tip" id="load-tip">加载森林素材</div>
+    </div>
+  </div>
+
+  <div class="screen hidden" id="start">
+    <div class="box panel">
+      <h1 class="title">熊二的世界</h1>
+      <div class="subtitle">狗 熊 岭 · 第 一 人 称 森 林 探 索</div>
+      <div class="hero">
+        <div class="card panel">
+          <img src="assets/tex/portrait_xionger.png" alt="熊二" />
+          <div class="t">
+            <b>熊二</b>
+            <span>我今天要做的:<br />过独木桥阻止光头强砍树,再找回 7 颗金松果。</span>
+          </div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="panel"><span class="key">W A S D</span> 走路</div>
+        <div class="panel"><span class="key">鼠标</span> 转头</div>
+        <div class="panel"><span class="key">Shift</span> 奔跑</div>
+        <div class="panel"><span class="key">Space</span> 跳跃</div>
+        <div class="panel"><span class="key">E</span> 和邻居说话</div>
+        <div class="panel"><span class="key">F</span> 用熊掌拍人</div>
+        <div class="panel"><span class="key">Esc</span> 暂停 / 松开鼠标</div>
+      </div>
+      <button class="cta" id="btn-start">开始探索</button>
+      <div class="foot-note">新手任务:光头强在河对岸砍树,过独木桥去阻止他!</div>
+    </div>
+  </div>
+
+  <div class="screen hidden" id="pause">
+    <div class="box panel">
+      <h1 class="title" style="font-size:44px">暂 停</h1>
+      <p style="opacity:.8;line-height:1.9">按 <b style="color:#ffd27a">E</b> 或点击按钮回到森林。</p>
+      <button class="cta" id="btn-resume">继续探索</button>
+    </div>
+  </div>
+
+  <div class="screen hidden" id="win">
+    <div class="box panel">
+      <h1>任务完成!</h1>
+      <p id="win-text">七颗金松果全部找齐啦!狗熊岭的邻居们都跑来给你鼓掌。</p>
+      <div class="stats">
+        <div class="stat panel"><b id="w-cones">7</b><span>金松果</span></div>
+        <div class="stat panel"><b id="w-talked">0</b><span>聊过的邻居</span></div>
+        <div class="stat panel"><b id="w-time">0:00</b><span>用时</span></div>
+        <div class="stat panel"><b id="w-walk">0m</b><span>走过的路</span></div>
+      </div>
+      <button class="cta" id="btn-again">再玩一次</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

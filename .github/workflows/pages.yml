@@ -1,0 +1,51 @@
+# 可选的自动发布方式:只把 tools/pack.mjs 挑出来的运行时文件(28MB)发到 GitHub Pages,
+# 适合想保留 AI 生图原稿、又不想让仓库变大的情况。
+#
+# 两条路选一条,不要同时用:
+#
+#  A. 最简单(推荐):不用这个 workflow。因为运行时文件就在仓库根目录、相对路径也都对,
+#     直接 Settings -> Pages -> Source 选 "Deploy from a branch" -> main / (root) 即可。
+#
+#  B. 用这个 workflow:Settings -> Pages -> Source 选 "GitHub Actions"。
+#     然后在 Actions 页面手动点 "Run workflow",或者把下面的 workflow_dispatch
+#     改成 push 触发。
+#
+# 故意只留手动触发:这样即使你选了方式 A,它也不会在你推送时跑出一次失败的部署。
+name: Deploy to GitHub Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # 只挑运行时文件,顺带写入 .nojekyll
+      - run: node tools/pack.mjs dist
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

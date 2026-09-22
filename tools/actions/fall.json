@@ -1,0 +1,1 @@
+{"actions": [{"type": "wait", "ms": 300}, {"type": "key", "key": "d", "durationMs": 900}, {"type": "wait", "ms": 700}]}

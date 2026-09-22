@@ -1,0 +1,146 @@
+{
+  "sky_pano": {
+    "w": 1536,
+    "h": 1024,
+    "mode": "RGB",
+    "kb": 1929.7
+  },
+  "ground_grass": {
+    "w": 1024,
+    "h": 1024,
+    "mode": "RGB",
+    "kb": 2474.0
+  },
+  "ground_dirt": {
+    "w": 1024,
+    "h": 1024,
+    "mode": "RGB",
+    "kb": 2390.3
+  },
+  "water_river": {
+    "w": 1024,
+    "h": 1024,
+    "mode": "RGB",
+    "kb": 1748.9
+  },
+  "tex_bark": {
+    "w": 1024,
+    "h": 1024,
+    "mode": "RGB",
+    "kb": 2298.4
+  },
+  "tex_cliff": {
+    "w": 1024,
+    "h": 1024,
+    "mode": "RGB",
+    "kb": 2280.2
+  },
+  "tree_pine": {
+    "w": 473,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 676.6
+  },
+  "tree_oak": {
+    "w": 806,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 1483.8
+  },
+  "tree_big": {
+    "w": 707,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 1221.4
+  },
+  "tree_bush": {
+    "w": 640,
+    "h": 578,
+    "mode": "RGBA",
+    "kb": 734.6
+  },
+  "prop_log": {
+    "w": 1024,
+    "h": 442,
+    "mode": "RGBA",
+    "kb": 609.7
+  },
+  "prop_rock": {
+    "w": 640,
+    "h": 560,
+    "mode": "RGBA",
+    "kb": 733.5
+  },
+  "prop_hut": {
+    "w": 1198,
+    "h": 836,
+    "mode": "RGBA",
+    "kb": 1933.0
+  },
+  "item_pinecone": {
+    "w": 168,
+    "h": 256,
+    "mode": "RGBA",
+    "kb": 80.7
+  },
+  "prop_stump": {
+    "w": 512,
+    "h": 364,
+    "mode": "RGBA",
+    "kb": 363.4
+  },
+  "tree_chopped": {
+    "w": 365,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 476.3
+  },
+  "char_xiongda": {
+    "w": 700,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 925.0
+  },
+  "char_guangtouqiang": {
+    "w": 565,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 750.1
+  },
+  "char_squirrel": {
+    "w": 749,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 1048.0
+  },
+  "char_monkey": {
+    "w": 600,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 753.2
+  },
+  "char_owl": {
+    "w": 610,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 1074.6
+  },
+  "char_cuihua": {
+    "w": 545,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 786.7
+  },
+  "portrait_xionger": {
+    "w": 495,
+    "h": 512,
+    "mode": "RGBA",
+    "kb": 440.1
+  },
+  "hands_xionger": {
+    "w": 250,
+    "h": 285,
+    "mode": "RGBA",
+    "kb": 141.8
+  }
+}

@@ -1,0 +1,22 @@
+# 只有运行时文件需要进仓库,GitHub Pages 直接从仓库发出去。
+# 这些是开发用的,不要提交:
+node_modules/
+dist/
+docs/
+tools/shots/
+.perf-profile-*/
+.chrome-perf-profile/
+.mem-profile-*/
+.check-profile-*/
+.smoke-profile-*/
+__pycache__/
+*.pyc
+
+# AI 生图原稿(53MB),只有重新生成素材时才需要,浏览器不会请求
+assets/raw/
+
+# 别的工具把 %SystemDrive% 变量展开失败后复制进来的系统缓存垃圾
+%SystemDrive%/
+
+# 本地启动日志
+gen2.log

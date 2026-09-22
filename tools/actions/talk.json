@@ -1,0 +1,1 @@
+{"actions": [{"type": "wait", "ms": 400}, {"type": "key", "key": "e", "durationMs": 60}, {"type": "wait", "ms": 250}, {"type": "key", "key": "e", "durationMs": 60}, {"type": "wait", "ms": 200}, {"type": "key", "key": "e", "durationMs": 60}, {"type": "wait", "ms": 200}, {"type": "key", "key": "e", "durationMs": 60}, {"type": "wait", "ms": 300}]}
