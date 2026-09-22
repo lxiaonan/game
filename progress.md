@@ -124,6 +124,34 @@ Original prompt: 帮我制作一个以第一人称是熊二为人物的角色进
 体积上限也够宽:单文件最大 2.42MB(Pages 上限 100MB/文件),站点 28MB(上限 1GB)。
 Pages 自带 CDN + HTTPS,所以 2核2G 那台服务器可以先不买。
 
+## 推送到 GitHub(2026-09-22)
+
+目标仓库 `https://github.com/lxiaonan/game.git`(当时是空仓库)。
+
+本地已经全部准备好,只差一次认证:
+
+- `git init -b main`,单个提交 `38b8cb9`,**79 个文件 / 27.8 MB**,工作区干净。
+- `.gitignore` 排除了 `node_modules/`、`dist/`、`tools/shots/`(58MB 调试截图)、
+  `assets/raw/`(53MB AI 生图原稿)、各种浏览器测试 profile、`%SystemDrive%/` 垃圾目录。
+- 提交内容是**仓库根目录即站点**的布局(`index.html`、`src/`、`vendor/`、`assets/tex/` 相对路径都对),
+  所以 Pages 直接选 `main / (root)` 即可,不需要 Action、不需要构建。
+- 远端已设为 `origin`。
+
+**我推不了**——这台机器上没有任何可用的 GitHub 凭据:
+`git credential fill` 查了三种 URL 形式都取不到密码(凭据管理器里只有个 `git:https://github.com` 空壳条目),
+`~/.ssh` 里只有 `known_hosts` 没有密钥,也没装 `gh`。SSH 试连 github 是 `Permission denied (publickey)`。
+认证必须由账号本人做一次。
+
+所以给了个双击就能跑的脚本:
+
+- `推送到GitHub.bat` —— **纯 ASCII**,只负责用 PowerShell 5.1 启动下面的脚本。
+  踩过一个坑:第一版把中文直接写在 `.bat` 里,cmd 会把 UTF-8 汉字的字节当成元字符,
+  整个脚本被解析得支离破碎(`'Personal' is not recognized`、`'t-scm.com' is not recognized`)。
+  现在中文全部移到 ps1,并且**必须存成 UTF-8 带 BOM**,否则 Windows PowerShell 5.1 读出来是乱码。
+- `tools/push_to_github.ps1` —— 提交 + 推送 + 失败时给出排查提示(窗口被关 / 账号不对 / 该用 token)。
+
+已用 PowerShell 5.1 实测:中文正常、无凭据时 2.8 秒内清晰报错、不卡住不弹窗。
+
 ## 新手任务(已接上)
 
 光头强在河对岸砍树。熊大把任务拆成:找熊大,走过独木桥,按 F 把光头强赶走,回去报喜,再找 7 颗金松果。
