@@ -97,9 +97,9 @@ export function createAudio() {
     src.buffer = noiseBuffer(0.25);
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = surface === 'dirt' ? 900 : 1500;
+    filter.frequency.value = surface === 'dirt' ? 900 : surface === 'water' ? 2200 : 1500;
     const gain = ctx.createGain();
-    const peak = (running ? 0.16 : 0.1) * (0.85 + Math.random() * 0.3);
+    const peak = (running ? 0.16 : 0.1) * (0.85 + Math.random() * 0.3) * (surface === 'water' ? 1.35 : 1);
     gain.gain.setValueAtTime(0.0001, t);
     gain.gain.linearRampToValueAtTime(peak, t + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + (running ? 0.19 : 0.26));

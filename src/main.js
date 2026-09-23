@@ -1,37 +1,24 @@
 import * as THREE from '../vendor/three.module.js';
 import { loadTextures } from './assets.js';
-import { buildWorld, LANDMARKS, RIVER, groundHeightAt, isOnBridge } from './world.js';
-import { buildNeighbours, nearestOf, syncCharacter } from './npcs.js';
+import { buildWorld, LANDMARKS, RIVER, REGIONS, groundHeightAt, isOnBridge, terrainHeight } from './world.js';
+import { buildNeighbours, nearestOf } from './npcs.js';
 import { createPlayer } from './player.js';
+import { createProps, ARENA } from './props.js';
+import { createArena } from './enemies.js';
+import { createLevels, LEVELS } from './levels.js';
 import { createUI } from './ui.js';
 import { createAudio } from './audio.js';
 import { createBossFight } from './boss.js';
-import { createQuest } from './quest.js';
+import { loadSave, writeSave, clearSave } from './save.js';
 
 const ui = createUI();
 const audio = createAudio();
 const params = new URLSearchParams(location.search);
 const AUTOSTART = params.get('autostart') === '1';
-
-const HINTS = {
-  xiongda: '去林子里找会发光的金松果,找齐 7 颗带回来给我。',
-  bengbeng: '营地向北,那棵最大的千年大树下面有一颗。',
-  jiji: '西边的巨石阵下面藏着一颗,敢不敢去?',
-  tutu: '东边的小路上有一颗被风吹走的松果。',
-  asong: '东北方向的灌木丛里,我见过光一闪一闪的。',
-  maomao: '东南边的林子里有一颗,别告诉吉吉大王是我说的。',
-  gugu: '巨石阵的石头下面压着一颗,挪开石头就能看见。',
-  huashen: '营地南边的蘑菇圈附近,有一颗金松果。',
-  dahei: '北边的老林子深处还有两颗,小心别迷路。',
-  laoli: '伐木场后面的空地上,应该还有一颗。',
-  cuihua: '别光顾着玩,记得把松果带回家。',
-  guangtouqiang: '伐木场这边我翻过木头,一颗松果也没有,别找了。',
-};
+const DEV = params.get('dev') === '1';
+const FRESH = params.get('fresh') === '1' || DEV;
 
 const canvas = document.getElementById('scene');
-// MSAA stays on: now that the forest is instanced there is room in the frame
-// budget for it, and it is what keeps the hut/bridge/ground silhouettes clean.
-// `?aa=0` drops it for machines that are still struggling.
 const ANTIALIAS = params.get('aa') !== '0';
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -40,9 +27,6 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
 });
 const MAX_PIXEL_RATIO = 1.5;
-// Adaptive resolution keeps the frame budget on the GPU we actually have: this is
-// an integrated Arc, and the forest is fill rate bound, so pixels are the thing to
-// trade. `?scale=0.75` forces a fixed scale for A/B measurement.
 let renderScale = Math.min(1, Math.max(0.5, Number(params.get('scale')) || 1));
 let refreshMs = 16.7;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO) * renderScale);
@@ -74,19 +58,23 @@ scene.add(camera);
 
 const clock = { time: 0 };
 const input = {
-  forward: 0, strafe: 0, turn: 0, run: false, jump: false, interact: false, attack: false,
+  forward: 0, strafe: 0, turn: 0, run: false, jump: false,
+  interact: false, attack: false, roll: false, throw: false, crouch: false,
 };
 const keys = new Set();
 
 let world = null;
 let neighbours = null;
+let props = null;
+let arena = null;
+let levels = null;
 let boss = null;
-let quest = null;
-let talkables = [];
 let player = null;
 let mode = 'loading'; // loading | menu | playing | paused | win
+let overlay = null; // null | 'map' | 'board'
 let dialogue = null;
-let collected = 0;
+let talkables = [];
+let bag = { cone: 0, honey: 0, shroom: 0 };
 let talked = new Set();
 let playSeconds = 0;
 let walkDistance = 0;
@@ -99,8 +87,12 @@ let previousZ = 14;
 let treeRespawnTimer = 0;
 let bossDefeatHandled = false;
 let minimapTimer = 0;
+let mapTimer = 0;
+let downTimer = 0;
+let saveTimer = 30;
+let toastCooldown = 0;
 
-const TOTAL_CONES = 7;
+const PAW_KEY = 'E';
 
 // ------------------------------------------------------------------ setup
 function onResize() {
@@ -126,32 +118,58 @@ function updateInputFromKeys() {
   input.strafe = (pressed('KeyD') ? 1 : 0) - (pressed('KeyA') ? 1 : 0);
   input.turn = (pressed('ArrowLeft') ? 1 : 0) - (pressed('ArrowRight') ? 1 : 0);
   input.run = pressed('ShiftLeft') || pressed('ShiftRight');
+  input.crouch = pressed('KeyC');
+}
+
+function clearKeys() {
+  keys.clear();
+  updateInputFromKeys();
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.code === 'Tab') {
+    event.preventDefault();
+    if (mode === 'playing') toggleOverlay(overlay === 'board' ? null : 'board');
+    return;
+  }
   if (event.repeat) {
     if (event.code === 'KeyE' || event.code === 'Space') event.preventDefault();
     return;
   }
   keys.add(event.code);
   updateInputFromKeys();
+
   if (event.code === 'Space') {
     event.preventDefault();
     input.jump = true;
   }
+  if (event.code === 'KeyQ') {
+    event.preventDefault();
+    input.roll = true;
+  }
+  if (event.code === 'KeyR') {
+    event.preventDefault();
+    input.throw = true;
+  }
+  if (event.code === 'KeyM') {
+    event.preventDefault();
+    if (mode === 'playing') toggleOverlay(overlay === 'map' ? null : 'map');
+    return;
+  }
   if (event.code === 'KeyE' || event.code === 'Enter') {
     event.preventDefault();
-    if (mode === 'paused') {
-      togglePause(false);
-      return;
-    }
+    if (overlay) { toggleOverlay(null); return; }
+    if (mode === 'paused') { togglePause(false); return; }
     input.interact = true;
   }
   if (event.code === 'KeyF') {
     event.preventDefault();
     input.attack = true;
   }
-  if (event.code === 'Escape') togglePause(true);
+  if (event.code === 'Escape') {
+    if (overlay) { toggleOverlay(null); return; }
+    togglePause(true);
+  }
 });
 
 window.addEventListener('keyup', (event) => {
@@ -160,27 +178,41 @@ window.addEventListener('keyup', (event) => {
 });
 
 window.addEventListener('blur', () => {
-  keys.clear();
-  updateInputFromKeys();
+  clearKeys();
 });
 
 function togglePause(force) {
   if (mode !== 'playing' && mode !== 'paused') return;
   const want = force === undefined ? mode === 'playing' : force;
+  if (want && overlay) toggleOverlay(null);
   paused = want;
   mode = want ? 'paused' : 'playing';
   ui.showPause(want);
   if (want) {
     if (document.pointerLockElement) document.exitPointerLock();
-    keys.clear();
-    updateInputFromKeys();
+    clearKeys();
   } else {
     requestLock();
   }
 }
 
+/** Full screen map / chapter board. They freeze the bear but keep the world alive. */
+function toggleOverlay(next) {
+  overlay = next;
+  ui.showMap(next === 'map');
+  ui.showBoard(next === 'board');
+  if (next) {
+    if (document.pointerLockElement) document.exitPointerLock();
+    clearKeys();
+    if (next === 'board') ui.setLevelBoard({ levels: LEVELS, state: levels.state });
+    if (next === 'map') drawBigMap();
+  } else if (mode === 'playing') {
+    requestLock();
+  }
+}
+
 function requestLock() {
-  if (isTouch) return;
+  if (isTouch || overlay) return;
   if (!canvas.requestPointerLock) return;
   try {
     const result = canvas.requestPointerLock();
@@ -194,54 +226,79 @@ document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   if (locked) {
     hadPointerLock = true;
-  } else if (hadPointerLock && mode === 'playing') {
+  } else if (hadPointerLock && mode === 'playing' && !overlay) {
     togglePause(true);
   }
 });
 
 window.addEventListener('mousemove', (event) => {
-  if (document.pointerLockElement !== canvas || mode !== 'playing' || dialogue) return;
+  if (document.pointerLockElement !== canvas || mode !== 'playing' || dialogue || overlay) return;
   player.look(event.movementX || 0, event.movementY || 0, 0.0021);
 });
 
 canvas.addEventListener('click', () => {
-  if (mode === 'playing' && !dialogue) requestLock();
+  if (mode === 'playing' && !dialogue && !overlay) requestLock();
 });
 
 canvas.addEventListener('mousedown', (event) => {
   if (event.button !== 0) return;
   if (document.pointerLockElement !== canvas) return;
-  if (mode !== 'playing' || dialogue) return;
+  if (mode !== 'playing' || dialogue || overlay) return;
   input.attack = true;
 });
 
 // ------------------------------------------------------------------ interaction
-/** Xiong Da hands out both the tutorial and, later, the pinecone hunt. */
-function xiongDaScript() {
-  const stage = quest.state.stage;
-  if (stage === 'intro') {
-    return [
-      '熊二!你可算醒啦,正好有急事!',
-      '光头强在河对岸砍树呢,那棵大树要是倒了,咱们的家就没啦!',
-      '沿着小路一直往东走,踩着独木桥过河,快去阻止他!',
-    ];
+function inFront(target, maxDot) {
+  const dx = target.x - player.position.x;
+  const dz = target.z - player.position.z;
+  const distance = Math.hypot(dx, dz) || 1;
+  const facing = (dx / distance) * Math.sin(player.state.yaw) + (dz / distance) * Math.cos(player.state.yaw);
+  return { distance, facing, ok: facing >= maxDot };
+}
+
+/** The single thing the E key would act on right now, or null. */
+function findInteraction() {
+  let best = null;
+  const consider = (candidate) => {
+    if (!best || candidate.distance < best.distance) best = candidate;
+  };
+
+  const npc = nearestOf(talkables, player.position, 4.4);
+  if (npc) {
+    const test = inFront(npc.sprite.position, 0.1);
+    if (test.ok) {
+      consider({ kind: 'npc', target: npc, distance: test.distance });
+    }
   }
-  if (stage === 'bridge') return ['还愣着干啥?过了独木桥就是光头强!'];
-  if (stage === 'fight') return ['他就在桥东边的空地上砍树,按 F 用你的熊掌拍他!'];
-  if (stage === 'report') {
-    return [
-      '干得漂亮,熊二!树保住了,狗熊岭谢谢你。',
-      '不过还有件事——大风把 7 颗金松果吹得满森林都是。',
-      '帮我把它们找回来吧,找齐了请你吃蜂蜜饼!',
-    ];
+
+  for (const totem of props.totems) {
+    const test = inFront(totem.position, -0.2);
+    if (test.distance < 5.2 && test.ok) {
+      consider({ kind: 'totem', target: totem, distance: test.distance });
+    }
   }
-  if (quest.state.cones >= TOTAL_CONES) {
-    return [
-      '七颗金松果全都找齐啦!你真是狗熊岭最棒的熊!',
-      '今晚大家一起吃蜂蜜饼,翠花的饼管够!',
-    ];
+
+  for (const crystal of props.crystals) {
+    if (crystal.userData.lit) continue;
+    const test = inFront(crystal.position, -0.1);
+    if (test.distance < 3.8 && test.ok) {
+      consider({ kind: 'crystal', target: crystal, distance: test.distance });
+    }
   }
-  return ['还差几颗金松果?它们会发光,夜里也看得见。', '和邻居们聊聊,他们知道松果都吹到哪儿去了。'];
+
+  return best;
+}
+
+function promptFor(hit) {
+  if (!hit) return null;
+  if (hit.kind === 'npc') return `<kbd>${PAW_KEY}</kbd> 和 <em>${hit.target.name}</em> 说话`;
+  if (hit.kind === 'crystal') return `<kbd>${PAW_KEY}</kbd> 点亮 <em>晶石</em>`;
+  const level = LEVELS.find((l) => l.totem.x === hit.target.position.x && l.totem.z === hit.target.position.z);
+  if (level) {
+    const done = levels.state.done[level.id] ? '(已通关)' : '';
+    return `<kbd>${PAW_KEY}</kbd> 关卡石碑 · <em>第 ${level.index} 关 · ${level.title}</em>${done}`;
+  }
+  return `<kbd>${PAW_KEY}</kbd> 查看 <em>关卡石碑</em>`;
 }
 
 function startDialogue(npc) {
@@ -251,16 +308,12 @@ function startDialogue(npc) {
   audio.blip(npc.id.charCodeAt(0) * 3 + 400);
   if (!talked.has(npc.id)) {
     talked.add(npc.id);
-    if (npc.id !== 'xiongda') {
-      const hint = collected >= TOTAL_CONES ? '松果找齐啦,回去找熊大交任务吧!' : HINTS[npc.id];
-      if (hint && quest.state.stage === 'cones') ui.setQuest(collected, TOTAL_CONES, hint);
-    }
+    if (npc.id === 'xiongda') levels.onIntroDone();
   }
 }
 
 function scriptFor(npc) {
-  if (npc.id === 'xiongda') return xiongDaScript();
-  if (quest.state.stage === 'cones' && quest.state.cones >= TOTAL_CONES && npc.done) return npc.done;
+  if (npc.done && levels.state.completedCount >= LEVELS.length) return npc.done;
   return npc.talked ? (npc.after || npc.lines) : npc.lines;
 }
 
@@ -278,46 +331,113 @@ function advanceDialogue() {
   npc.talked = true;
   ui.closeDialogue();
   dialogue = null;
-  if (npc.id === 'xiongda') {
-    if (quest.state.stage === 'cones' && collected >= TOTAL_CONES) {
-      finishGame();
-    } else {
-      quest.onXiongdaTalked();
-    }
-  }
 }
 
-function questDone() {
-  return collected >= TOTAL_CONES;
+// ------------------------------------------------------------------ pickups
+function collectItem(item) {
+  item.userData.collected = true;
+  item.visible = false;
+  const kind = item.userData.kind;
+  bag[kind] = (bag[kind] || 0) + 1;
+  audio.pickup();
+  ui.setBag(bagCounts());
+  if (kind === 'cone') ui.toast(`捡到一颗 <b>金松果</b> · 共 ${bag.cone} 颗`, 1600);
+  else if (kind === 'honey') ui.toast(`捞到一罐 <b>野蜂蜜</b> · 共 ${bag.honey} 罐`, 1600);
+  else ui.toast(`采到一朵 <b>发光蘑菇</b> · 共 ${bag.shroom} 朵`, 1600);
+  levels.onPickup(kind);
+  saveSoon();
 }
 
-function finishGame() {
-  mode = 'win';
-  if (document.pointerLockElement) document.exitPointerLock();
+function bagCounts() {
+  return { ...bag, stars: levels ? levels.state.completedCount : 0, total: LEVELS.length };
+}
+
+function lightCrystal(crystal) {
+  crystal.userData.lit = true;
   audio.fanfare();
-  ui.setHud(false);
-  const total = playSeconds;
-  ui.showWin({
-    cones: collected,
-    talked: talked.size,
-    time: Math.floor(total / 60) + ':' + String(Math.floor(total % 60)).padStart(2, '0'),
-    walk: Math.round(walkDistance) + 'm',
-    text: '七颗金松果全部找齐啦!狗熊岭的邻居们都跑来给你鼓掌,熊大说今晚请大家吃蜂蜜。',
+  ui.toast('点亮了一块 <b>晶石</b>', 1600);
+  levels.onCrystalLit();
+  saveSoon();
+}
+
+// ------------------------------------------------------------------ environment
+const env = {
+  setNight(on) {
+    world.setNight(on, renderer);
+    ui.setStateChip(on
+      ? '夜晚 · 星光下也能看清路'
+      : 'WASD 走路 · Shift 跑 · C 蹲 · Q 翻滚 · F 出掌 · R 扔石头');
+  },
+  /** All five chapters cleared: hand the screen over to the ending. */
+  win() {
+    mode = 'win';
+    if (document.pointerLockElement) document.exitPointerLock();
+    ui.setHud(false);
+    saveNow();
+  },
+};
+
+function drawBigMap() {
+  ui.drawBigMap({
+    regions: REGIONS,
+    river: RIVER,
+    paths: world.pathSamples,
+    landmarks: LANDMARKS,
+    player: { x: player.position.x, z: player.position.z, yaw: player.state.yaw },
+    objective: levels.objective,
+    totems: props.totems.map((t) => {
+      const level = LEVELS.find((l) => l.totem.x === t.position.x && l.totem.z === t.position.z);
+      return {
+        x: t.position.x,
+        z: t.position.z,
+        label: level ? `${level.index}. ${level.title}` : '',
+        done: level ? levels.state.done[level.id] : false,
+        active: level ? levels.state.activeId === level.id : false,
+      };
+    }),
+    items: props.items.filter((i) => !i.userData.collected)
+      .map((i) => ({ x: i.position.x, z: i.position.z, kind: i.userData.kind })),
+    crystals: props.crystals.map((c) => ({ x: c.position.x, z: c.position.z, lit: c.userData.lit })),
+    neighbours: neighbours.list.map((n) => ({
+      x: n.sprite.position.x, z: n.sprite.position.z, talked: n.talked,
+    })),
+    levelLines: LEVELS.map((level) => ({
+      done: levels.state.done[level.id],
+      active: levels.state.activeId === level.id,
+      text: `第 ${level.index} 关 · ${level.title} · ${level.where}`
+        + (level.need ? ` · ${levels.state.progress[level.id]}/${level.need}` : '')
+        + (levels.state.done[level.id] ? ' · 已通关' : ''),
+    })),
   });
 }
 
-function collectPinecone(cone) {
-  cone.userData.collected = true;
-  cone.visible = false;
-  collected += 1;
-  audio.pickup();
-  if (collected >= TOTAL_CONES) {
-    ui.toast('全部 <b>7</b> 颗金松果都找到啦!回去找 <b>熊大</b> 交任务吧');
-  } else {
-    ui.toast('捡到一颗 <b>金松果</b> ' + collected + ' / ' + TOTAL_CONES);
-  }
-  quest.onConeCollected(collected, TOTAL_CONES);
+// ------------------------------------------------------------------ saving
+function snapshot() {
+  return {
+    done: levels.state.done,
+    progress: levels.state.progress,
+    bag,
+    activeId: levels.state.activeId,
+    introDone: levels.state.introDone,
+  };
 }
+
+function saveSoon() {
+  saveTimer = Math.min(saveTimer, 4);
+}
+
+function saveNow() {
+  if (!levels) return;
+  writeSave(snapshot());
+}
+
+// Closing the tab or backgrounding the page must not lose the chapter progress:
+// the periodic save is 30 seconds apart, which is a long window to lose.
+window.addEventListener('pagehide', saveNow);
+window.addEventListener('beforeunload', saveNow);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveNow();
+});
 
 // ------------------------------------------------------------------ touch
 function setupTouch() {
@@ -374,18 +494,19 @@ function setupTouch() {
   canvas.addEventListener('pointerup', (event) => {
     if (event.pointerId === lookId) lookId = null;
   });
-  document.getElementById('btn-use').addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    input.interact = true;
-  });
-  document.getElementById('btn-jump').addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    input.jump = true;
-  });
-  document.getElementById('btn-hit').addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    input.attack = true;
-  });
+  const bind = (id, action) => {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      action();
+    });
+  };
+  bind('btn-use', () => { input.interact = true; });
+  bind('btn-jump', () => { input.jump = true; });
+  bind('btn-hit', () => { input.attack = true; });
+  bind('btn-roll', () => { input.roll = true; });
+  bind('btn-throw', () => { input.throw = true; });
 }
 
 // ------------------------------------------------------------------ loop
@@ -395,25 +516,80 @@ function step(dt) {
   if (mode === 'playing' || mode === 'paused' || mode === 'win') {
     world.update(dt, clock.time);
   }
-  if (quest) quest.update(dt, clock.time);
   if (mode !== 'playing') {
     input.interact = false;
     input.jump = false;
     input.attack = false;
+    input.roll = false;
+    input.throw = false;
+    return;
+  }
+  if (overlay) {
+    // the map and the chapter board freeze the bear but not the valley
+    arena.update(dt, clock.time, player.position);
+    props.update(dt, clock.time, player.position);
+    levels.update(dt, clock.time, player.position);
+    input.interact = false;
+    input.attack = false;
+    input.roll = false;
+    input.throw = false;
     return;
   }
 
   if (input.turn) player.state.yaw += input.turn * 2.3 * dt;
-  player.update(dt, input);
 
-  // ---------------- paw attack ----------------
+  // ---------------- knocked out ----------------
+  if (downTimer > 0) {
+    downTimer -= dt;
+    player.update(dt, { ...input, forward: 0, strafe: 0, jump: false, roll: false, attack: false });
+    if (downTimer <= 0) {
+      player.revive();
+      player.teleport(2, 14, Math.PI);
+      previousX = player.position.x;
+      previousZ = player.position.z;
+      ui.toast('熊二被抬回营地,缓过来了……再去试试!', 3200);
+    }
+  } else {
+    player.update(dt, input);
+  }
+
+  // ---------------- paw combat ----------------
   if (input.attack) {
     input.attack = false;
     if (!dialogue && player.attack()) audio.blip(320);
   }
-  if (boss && player.attackImpactReady() && boss.resolvePunch()) {
-    player.state.attackLanded = true;
-    boss.applyHit();
+  if (player.state.attacking) {
+    ui.setCombo(player.state.attackIndex + 1);
+  } else {
+    ui.setCombo(0);
+  }
+  if (!dialogue && player.attackImpactReady()) {
+    let landed = false;
+    if (boss && boss.resolvePunch()) {
+      boss.applyHit();
+      landed = true;
+    }
+    if (arena.resolveSwing(player.attackDamage()) > 0) landed = true;
+    if (landed) {
+      player.state.attackLanded = true;
+      ui.hitFlash();
+    }
+  }
+
+  // ---------------- thrown stones ----------------
+  for (const shot of player.projectiles) {
+    if (!shot.live || shot.hit) continue;
+    const sx = shot.sprite.position.x;
+    const sz = shot.sprite.position.z;
+    let hit = false;
+    if (arena.hitNear(sx, sz, 1.8, 12) > 0) hit = true;
+    if (boss && boss.state.active && boss.hitNear(sx, sz, 2.0, 12)) hit = true;
+    if (hit) {
+      shot.hit = true;
+      shot.live = false;
+      shot.sprite.visible = false;
+      audio.blip(260);
+    }
   }
 
   playSeconds += dt;
@@ -426,7 +602,7 @@ function step(dt) {
   const stride = player.state.speed > 5.4 ? 2.7 : 2.1;
   if (stepAccumulator > stride) {
     stepAccumulator = 0;
-    audio.footstep(player.state.speed > 5.4);
+    audio.footstep(player.state.speed > 5.4, player.state.wading ? 'water' : 'grass');
   }
 
   // ---------------- wading / falling into the river ----------------
@@ -441,23 +617,23 @@ function step(dt) {
     player.state.wasInRiver = false;
   }
   if (inWater) {
-    // swept back to the nearest bank with a splash
     const toWest = Math.abs(player.position.x - (RIVER.x - RIVER.halfWidth));
     const toEast = Math.abs(player.position.x - (RIVER.x + RIVER.halfWidth));
-    const bank = toWest < toEast ? RIVER.x - RIVER.halfWidth - 1.6 : RIVER.x + RIVER.halfWidth + 1.6;
-    player.position.set(bank, 0.4, player.position.z);
+    const bank = toWest < toEast ? RIVER.x - RIVER.halfWidth - 2.4 : RIVER.x + RIVER.halfWidth + 2.4;
+    player.position.set(bank, terrainHeight(bank, player.position.z) + 0.4, player.position.z);
     player.state.onGround = false;
     player.state.stun = 0.45;
     player.state.shake = 0.8;
+    if (player.hurt(6)) ui.hitFlash();
   }
 
-  // ---------------- crossed the bridge? ----------------
-  if (quest.state.stage === 'bridge' && !onBridge
-      && player.position.x > RIVER.x + RIVER.halfWidth + 1.2
-      && player.position.y > -0.2) {
-    quest.onCrossedBridge();
-    if (boss) boss.activate();
+  // ---------------- health ----------------
+  if (player.state.hp <= 0 && downTimer <= 0) {
+    downTimer = 1.5;
+    ui.hitFlash();
+    ui.toast('<b>熊二倒下了!</b>', 2000);
   }
+  if (player.state.hurtFlash > 0.85) ui.hitFlash();
 
   chirpTimer -= dt;
   if (chirpTimer <= 0 && !dialogue) {
@@ -466,23 +642,29 @@ function step(dt) {
   }
 
   neighbours.update(dt, clock.time, player.position);
+
+  // ---------------- the lumberjack ----------------
   if (boss) {
-    if (!boss.state.active && quest.state.stage !== 'intro') {
+    if (!boss.state.active && boss.state.phase !== 'defeated' && boss.state.phase !== 'fleeing') {
       const toTree = Math.hypot(player.position.x - 48, player.position.z - 13);
-      if (toTree < 26) boss.activate();
+      if (toTree < 30 || levels.state.activeId === 'lv1') boss.activate();
     }
     boss.update(dt, clock.time, player.position, Boolean(dialogue));
     if (boss.state.lastEvent === 'treeFell') {
       boss.state.lastEvent = null;
-      quest.onTreeFell();
       treeRespawnTimer = 3.4;
+      ui.toast('<b>大树倒了!</b> 光头强又拖来一棵继续砍……再来一次!', 4200);
     }
-    ui.setBossBars(boss.state.active && boss.state.phase !== 'fleeing'
-      ? { hp: boss.getHp(), maxHp: 100, treeHp: boss.getTreeHp(), treeMaxHp: 100 }
+    const fighting = boss.state.active && boss.state.phase !== 'fleeing' && boss.state.phase !== 'defeated';
+    const near = Math.hypot(boss.character.sprite.position.x - player.position.x,
+      boss.character.sprite.position.z - player.position.z) < 48;
+    ui.setBossBars(fighting && near
+      ? { name: '光头强', hp: boss.getHp(), maxHp: 100, treeHp: boss.getTreeHp(), treeMaxHp: 100 }
       : null);
     if (boss.state.hp <= 0 && boss.state.phase === 'defeated' && !bossDefeatHandled) {
       bossDefeatHandled = true;
-      quest.onBossDefeated();
+      levels.onBossDefeated();
+      saveSoon();
     }
   }
   if (treeRespawnTimer > 0) {
@@ -490,77 +672,124 @@ function step(dt) {
     if (treeRespawnTimer <= 0) {
       boss.reset();
       boss.activate();
-      ui.toast('光头强又拖来一棵树继续砍,再揍他一顿!', 3000);
     }
   }
 
-  for (const cone of world.pinecones) {
-    if (cone.userData.collected) continue;
-    const d = Math.hypot(cone.position.x - player.position.x, cone.position.z - player.position.z);
-    if (d < 2.3) collectPinecone(cone);
+  // ---------------- arena ----------------
+  arena.update(dt, clock.time, player.position);
+  if (arena.state.active) {
+    ui.setBossBars({
+      name: `第 ${arena.state.wave + 1} 波 · 剩 ${arena.getAlive()}`,
+      hp: Math.max(0, 100 - (arena.state.wave * 33 + Math.max(0, 3 - arena.getAlive()) * 8)),
+      maxHp: 100,
+      tree: false,
+    });
   }
 
-  const near = nearestOf(talkables, player.position);
-  // only offer a chat when the neighbour is actually in front of the player
-  let target = near;
-  if (near) {
-    const dx = near.sprite.position.x - player.position.x;
-    const dz = near.sprite.position.z - player.position.z;
-    const distance = Math.hypot(dx, dz) || 1;
-    const facing = (dx / distance) * Math.sin(player.state.yaw) + (dz / distance) * Math.cos(player.state.yaw);
-    if (facing < 0.15) target = null;
+  props.update(dt, clock.time, player.position);
+
+  // ---------------- auto pickups ----------------
+  for (const item of props.items) {
+    if (item.userData.collected) continue;
+    const d = Math.hypot(item.position.x - player.position.x, item.position.z - player.position.z);
+    if (d < 2.2) collectItem(item);
   }
+
+  // ---------------- interaction prompt ----------------
+  const hit = dialogue ? null : findInteraction();
   if (dialogue) {
     if (input.interact) advanceDialogue();
     input.interact = false;
   } else {
-    ui.setPrompt(target ? target.name : null);
+    ui.setPrompt(promptFor(hit));
     if (input.interact) {
       input.interact = false;
-      if (target) startDialogue(target);
+      if (hit && hit.kind === 'npc') startDialogue(hit.target);
+      else if (hit && hit.kind === 'crystal') lightCrystal(hit.target);
+      else if (hit && hit.kind === 'totem') {
+        ui.setLevelBoard({ levels: LEVELS, state: levels.state });
+        toggleOverlay('board');
+      }
     }
   }
 
+  levels.update(dt, clock.time, player.position);
+
+  ui.setVitals({
+    hp: Math.max(0, player.state.hp),
+    maxHp: player.state.maxHp,
+    stamina: player.state.stamina,
+    staminaMax: player.state.staminaMax,
+    wading: player.state.wading,
+    crouching: player.state.crouching,
+    rolling: player.state.rolling,
+  });
+
   ui.setCompass(player.state.yaw, player.position.x, player.position.z);
   updateTracker();
-  // building this object allocates several arrays; the minimap only repaints a
-  // few times a second, so skip the work in between
+
   minimapTimer -= dt;
   if (minimapTimer <= 0) {
-    minimapTimer = 0.12;
+    minimapTimer = 0.14;
     ui.drawMinimap({
+      regions: REGIONS,
       paths: world.pathSamples,
       landmarks: LANDMARKS,
       river: RIVER,
-      objective: quest.objective,
-      pinecones: world.pinecones.map((c) => ({ x: c.position.x, z: c.position.z, collected: c.userData.collected })),
-      neighbours: talkables
-        .filter((n) => n.sprite.visible)
-        .map((n) => ({ x: n.sprite.position.x, z: n.sprite.position.z, talked: n.talked })),
+      objective: levels.objective,
+      items: props.items.filter((c) => !c.userData.collected)
+        .map((c) => ({ x: c.position.x, z: c.position.z, kind: c.userData.kind })),
+      totems: props.totems.map((t) => {
+        const level = LEVELS.find((l) => l.totem.x === t.position.x && l.totem.z === t.position.z);
+        return {
+          x: t.position.x,
+          z: t.position.z,
+          done: level ? levels.state.done[level.id] : false,
+          active: level ? levels.state.activeId === level.id : false,
+        };
+      }),
+      neighbours: neighbours.list.map((n) => ({
+        x: n.sprite.position.x, z: n.sprite.position.z, talked: n.talked,
+      })),
       player: { x: player.position.x, z: player.position.z, yaw: player.state.yaw },
     });
   }
+
+  mapTimer -= dt;
+  if (mapTimer <= 0) {
+    mapTimer = 0.2;
+    // building the payload allocates a dozen arrays; skip it entirely when the
+    // map is not on screen
+    if (ui.isMapOpen()) drawBigMap();
+  }
+
+  saveTimer -= dt;
+  if (saveTimer <= 0) {
+    saveTimer = 30;
+    saveNow();
+  }
+
+  if (toastCooldown > 0) toastCooldown -= dt;
 }
 
 /** Rotate the little arrow so it always points at the current objective. */
 function updateTracker() {
-  if (!quest || mode !== 'playing') {
+  if (mode !== 'playing' || !levels.objective.show) {
     ui.setTracker(null);
     return;
   }
-  const dx = quest.objective.x - player.position.x;
-  const dz = quest.objective.z - player.position.z;
+  const dx = levels.objective.x - player.position.x;
+  const dz = levels.objective.z - player.position.z;
   const distance = Math.hypot(dx, dz);
-  if (!quest.objective.show || distance < 2.2) {
+  if (distance < 2.2) {
     ui.setTracker(null);
     return;
   }
-  // bearing of the target relative to the way the player is facing, in screen degrees
   const targetAngle = Math.atan2(dx, dz);
   let relative = targetAngle - player.state.yaw;
   relative = Math.atan2(Math.sin(relative), Math.cos(relative));
   ui.setTracker({
-    label: quest.objective.label,
+    label: levels.objective.label,
     distance,
     degrees: (relative * 180) / Math.PI,
   });
@@ -568,7 +797,6 @@ function updateTracker() {
 
 let lastFrame = performance.now();
 let fps = 60;
-// rolling frame time in ms, used by the resolution controller
 let frameBudget = 16.7;
 let slowFrames = 0;
 let fastFrames = 0;
@@ -623,6 +851,88 @@ window.advanceTime = (ms) => {
 };
 
 /**
+ * Test-only introspection and setup.
+ *
+ * The smoke test used to reach each scenario by reloading the page with a
+ * different `?pose=` / `?dev=` combination, which meant ~17 WebGL contexts in a
+ * row and an occasional GPU process crash. Driving one loaded page through this
+ * is both faster and far more reliable, and it exercises the same public systems
+ * the keyboard does.
+ */
+window.__dshDebug = {
+  projectiles: () => (player ? player.projectiles.filter((p) => p.live).length : 0),
+  liveEnemies: () => (arena ? arena.getAlive() : 0),
+  enemies: () => (arena ? arena.list.filter((e) => !e.dead).map((e) => ({
+    name: e.data.name,
+    hp: e.hp,
+    x: +e.character.sprite.position.x.toFixed(2),
+    z: +e.character.sprite.position.z.toFixed(2),
+  })) : []),
+  totemCount: () => (props ? props.totems.length : 0),
+  regionAt: (x, z) => REGIONS.map((r) => `${r.id}:${Math.round(Math.hypot(r.x - x, r.z - z))}`).join(' '),
+  terrainAt: (x, z) => terrainHeight(x, z),
+  place: (x, z, yawDeg) => {
+    if (!player) return false;
+    player.teleport(x, z, yawDeg === undefined ? undefined : (yawDeg * Math.PI) / 180);
+    previousX = player.position.x;
+    previousZ = player.position.z;
+    return true;
+  },
+  startLevel: (id) => levels.start(id),
+  introDone: () => levels.onIntroDone(),
+  resetProgress: () => {
+    for (const level of LEVELS) {
+      levels.state.done[level.id] = false;
+      levels.state.progress[level.id] = 0;
+    }
+    levels.state.completedCount = 0;
+    levels.state.activeId = null;
+    levels.state.introDone = false;
+    bag = { cone: 0, honey: 0, shroom: 0 };
+    for (const item of props.items) {
+      item.userData.collected = false;
+      item.visible = true;
+    }
+    for (const crystal of props.crystals) crystal.userData.lit = false;
+    arena.stop();
+    ui.setBag(bagCounts());
+    levels.refreshObjective();
+  },
+  give: (kind, count) => {
+    let taken = 0;
+    for (const item of props.items) {
+      if (taken >= count) break;
+      if (item.userData.kind !== kind || item.userData.collected) continue;
+      item.userData.collected = true;
+      item.visible = false;
+      bag[kind] = (bag[kind] || 0) + 1;
+      taken += 1;
+      levels.onPickup(kind);
+    }
+    ui.setBag(bagCounts());
+    saveSoon();
+    return taken;
+  },
+  lightCrystal: (index) => {
+    const crystal = props.crystals[index];
+    if (!crystal) return false;
+    crystal.userData.lit = true;
+    levels.onCrystalLit();
+    saveSoon();
+    return true;
+  },
+  levelSnapshot: () => levels.snapshot(),
+  bag: () => ({ ...bag }),
+  /** Come back from the ending screen so the test can keep driving the page. */
+  resume: () => {
+    mode = 'playing';
+    ui.hideWin();
+    ui.setHud(true);
+    return mode;
+  },
+};
+
+/**
  * Texture memory actually resident on the GPU.
  *
  * Keyed by texture.source, not by Texture object: three.js uploads one copy per
@@ -647,41 +957,51 @@ function textureMemory() {
   return { unique: seen.size, mb: bytes / 1048576 };
 }
 
-/** Size of the drawing buffer, including the multisample buffers when MSAA is on. */
 function canvasMemory() {
   const gl = renderer.getContext();
   const pixels = renderer.domElement.width * renderer.domElement.height;
   const samples = ANTIALIAS ? (gl.getParameter(gl.SAMPLES) || 4) : 1;
-  // colour + depth, multiplied by the sample count for the MSAA targets
   return (pixels * 4 * (1 + samples)) / 1048576;
 }
 
 window.render_game_to_text = () => {
   if (!player) return JSON.stringify({ mode });
   const near = neighbours ? neighbours.nearest(player.position) : null;
+  const entry = (n) => ({
+    name: n.name,
+    x: +n.sprite.position.x.toFixed(1),
+    z: +n.sprite.position.z.toFixed(1),
+    dist: +Math.hypot(n.sprite.position.x - player.position.x, n.sprite.position.z - player.position.z).toFixed(1),
+    talked: n.talked,
+  });
   const nearby = neighbours
-    ? neighbours.list
-      .map((n) => ({
-        name: n.name,
-        dx: +(n.sprite.position.x - player.position.x).toFixed(1),
-        dz: +(n.sprite.position.z - player.position.z).toFixed(1),
-        dist: +Math.hypot(n.sprite.position.x - player.position.x, n.sprite.position.z - player.position.z).toFixed(1),
-        talked: n.talked,
-      }))
-      .filter((n) => n.dist < 22)
+    ? neighbours.list.map(entry)
+      .filter((n) => n.dist < 26)
       .sort((a, b) => a.dist - b.dist)
     : [];
   return JSON.stringify({
     mode,
     paused,
-    questStage: quest ? quest.state.stage : null,
+    overlay,
+    level: levels ? {
+      active: levels.state.activeId,
+      completed: levels.state.completedCount,
+      total: LEVELS.length,
+      done: levels.state.done,
+      progress: levels.state.progress,
+      introDone: levels.state.introDone,
+      title: document.getElementById('q-title').textContent,
+    } : null,
+    levels: levels ? levels.snapshot() : [],
+    questStage: levels ? levels.state.activeId : null,
     questTitle: document.getElementById('q-title').textContent,
     questHint: document.getElementById('q-hint').textContent,
-    objective: quest ? {
-      label: quest.objective.label,
-      x: +quest.objective.x.toFixed(1),
-      z: +quest.objective.z.toFixed(1),
-      distance: +Math.hypot(quest.objective.x - player.position.x, quest.objective.z - player.position.z).toFixed(1),
+    objective: levels ? {
+      label: levels.objective.label,
+      x: +levels.objective.x.toFixed(1),
+      z: +levels.objective.z.toFixed(1),
+      show: levels.objective.show,
+      distance: +Math.hypot(levels.objective.x - player.position.x, levels.objective.z - player.position.z).toFixed(1),
     } : null,
     boss: boss ? {
       active: boss.state.active,
@@ -695,11 +1015,21 @@ window.render_game_to_text = () => {
         boss.character.sprite.position.z - player.position.z,
       ).toFixed(2),
     } : null,
+    arena: arena ? {
+      active: arena.state.active,
+      wave: arena.state.wave,
+      alive: arena.getAlive(),
+      cleared: arena.state.cleared,
+    } : null,
     attacking: player.state.attacking,
+    attackIndex: player.state.attackIndex,
+    rolling: player.state.rolling,
+    crouching: player.state.crouching,
+    wading: player.state.wading,
+    hurt: +player.state.hurtFlash.toFixed(2),
     stun: +player.state.stun.toFixed(2),
     inWater: player.state.wasInRiver,
     onBridge: isOnBridge(player.position.x, player.position.z),
-    treeFallen: quest ? quest.state.treeFallen : false,
     player: {
       x: +player.position.x.toFixed(2),
       z: +player.position.z.toFixed(2),
@@ -707,30 +1037,51 @@ window.render_game_to_text = () => {
       yawDeg: +(((player.state.yaw * 180) / Math.PI) % 360).toFixed(1),
       speed: +player.state.speed.toFixed(2),
       onGround: player.state.onGround,
+      hp: +player.state.hp.toFixed(1),
+      maxHp: player.state.maxHp,
+      stamina: +player.state.stamina.toFixed(1),
+      ground: +terrainHeight(player.position.x, player.position.z).toFixed(2),
     },
     quest: {
-      found: collected,
-      total: TOTAL_CONES,
+      found: bag.cone,
+      total: 7,
       hint: document.getElementById('q-hint').textContent,
       neighboursTalked: talked.size,
     },
-    pinecones: world
-      ? world.pinecones.map((c, i) => ({
-        i,
-        x: +c.position.x.toFixed(1),
-        z: +c.position.z.toFixed(1),
-        collected: c.userData.collected,
-      }))
-      : [],
+    bag: { ...bag, stars: levels.state.completedCount },
+    items: props ? props.items.map((c, i) => ({
+      i,
+      kind: c.userData.kind,
+      x: +c.position.x.toFixed(1),
+      z: +c.position.z.toFixed(1),
+      collected: c.userData.collected,
+    })) : [],
+    pinecones: props ? props.items
+      .map((c, i) => ({ i, c }))
+      .filter((e) => e.c.userData.kind === 'cone')
+      .map((e) => ({
+        i: e.i,
+        x: +e.c.position.x.toFixed(1),
+        z: +e.c.position.z.toFixed(1),
+        collected: e.c.userData.collected,
+      })) : [],
+    crystals: props ? props.crystals.map((c, i) => ({
+      i, x: +c.position.x.toFixed(1), z: +c.position.z.toFixed(1), lit: c.userData.lit,
+    })) : [],
+    totems: props ? props.totems.map((t) => ({ x: +t.position.x.toFixed(1), z: +t.position.z.toFixed(1) })) : [],
     dialogue: dialogue
       ? { speaker: dialogue.npc.name, line: dialogue.index, text: document.getElementById('d-text').textContent }
       : null,
     prompt: document.getElementById('prompt').classList.contains('on')
-      ? document.getElementById('prompt-name').textContent
+      ? document.getElementById('prompt').textContent
       : null,
-    nearest: near ? { name: near.name, dist: +Math.hypot(near.sprite.position.x - player.position.x, near.sprite.position.z - player.position.z).toFixed(2) } : null,
+    nearest: near ? {
+      name: near.name,
+      dist: +Math.hypot(near.sprite.position.x - player.position.x, near.sprite.position.z - player.position.z).toFixed(2),
+    } : null,
     nearbyNeighbours: nearby,
     landmarks: LANDMARKS,
+    arena2: { x: ARENA.x, z: ARENA.z },
     seconds: +playSeconds.toFixed(1),
     distance: +walkDistance.toFixed(1),
     fps: Math.round(fps),
@@ -750,7 +1101,7 @@ window.render_game_to_text = () => {
         canvasMB: +canvasMemory().toFixed(1),
       };
     })(),
-    hint: 'WASD 走路 / 方向键转身 / Shift 奔跑 / Space 跳 / E 和邻居说话',
+    hint: 'WASD 走路 / Shift 跑 / C 蹲 / Q 翻滚 / Space 跳 / F 熊掌三连 / R 扔石头 / E 交互 / M 地图 / Tab 关卡',
   });
 };
 
@@ -761,17 +1112,53 @@ function enterGame() {
   mode = 'playing';
   audio.start();
   if (!isTouch) requestLock();
-  quest.applyStage(quest.state.stage);
-  ui.toast('走进营地找 <b>熊大</b> 接任务吧', 3200);
+  levels.setCard(levels.activeLevel());
+  levels.refreshObjective();
+  ui.toast('整片狗熊岭随便走,发光的<b>关卡石碑</b>按 E 就能选关', 4000);
   canvas.focus();
 }
 
 document.getElementById('btn-start').addEventListener('click', enterGame);
 document.getElementById('btn-resume').addEventListener('click', () => togglePause(false));
-document.getElementById('btn-again').addEventListener('click', () => location.reload());
+document.getElementById('btn-again').addEventListener('click', () => {
+  clearSave();
+  location.reload();
+});
 document.getElementById('dialogue').addEventListener('click', () => {
   if (dialogue) advanceDialogue();
 });
+
+function applySave(save) {
+  if (!save) return;
+  for (const level of LEVELS) {
+    if (save.done[level.id]) {
+      levels.state.done[level.id] = true;
+      levels.state.completedCount += 1;
+    }
+    if (typeof save.progress[level.id] === 'number') {
+      levels.state.progress[level.id] = Math.min(level.need || 99, save.progress[level.id]);
+    }
+  }
+  bag = { ...bag, ...save.bag };
+  levels.state.introDone = save.introDone;
+  if (save.activeId && !levels.state.done[save.activeId]) levels.state.activeId = save.activeId;
+  // re-apply the world side of the progress so the map and the tracker agree
+  let remainingCones = bag.cone;
+  let remainingHoney = bag.honey;
+  let remainingShrooms = bag.shroom;
+  for (const item of props.items) {
+    const kind = item.userData.kind;
+    if (kind === 'cone' && remainingCones > 0) { remainingCones -= 1; item.userData.collected = true; item.visible = false; }
+    if (kind === 'honey' && remainingHoney > 0) { remainingHoney -= 1; item.userData.collected = true; item.visible = false; }
+    if (kind === 'shroom' && remainingShrooms > 0) { remainingShrooms -= 1; item.userData.collected = true; item.visible = false; }
+  }
+  const lit = levels.state.progress.lv4 || 0;
+  props.crystals.slice(0, lit).forEach((crystal) => { crystal.userData.lit = true; });
+  // replay the upgrades the completed chapters had already granted
+  for (const level of LEVELS) {
+    if (levels.state.done[level.id] && player.grantReward) player.grantReward(level.id);
+  }
+}
 
 loadTextures((done, total, file) => {
   ui.setLoading(done / total, '加载 ' + file + ' (' + done + '/' + total + ')');
@@ -779,42 +1166,70 @@ loadTextures((done, total, file) => {
   ui.setLoading(1, '搭 建 狗 熊 岭 …');
   world = buildWorld(scene, textures);
   neighbours = buildNeighbours(scene, textures);
+  props = createProps(scene, textures, world);
+  world.colliders.push(...props.colliders);
   player = createPlayer(camera, scene, textures, world.colliders, groundHeightAt);
   boss = createBossFight(scene, textures, world, audio, player, ui);
+  arena = createArena(scene, textures, { ui, audio, player });
   talkables = [...neighbours.list, boss.character];
-  quest = createQuest({
-    scene, ui, audio, player, world,
+  levels = createLevels({
+    scene, ui, audio, world, props, player, boss, arena, env,
     xiongdaPos: { x: neighbours.list[0].x, z: neighbours.list[0].z },
+    groundAt: groundHeightAt,
   });
-  quest.applyStage('intro');
+  ui.onStartLevel((id) => {
+    levels.start(id);
+    toggleOverlay(null);
+  });
+
+  if (!FRESH) applySave(loadSave());
+  ui.setBag(bagCounts());
+  ui.setLevelBoard({ levels: LEVELS, state: levels.state });
+  levels.setCard(levels.activeLevel());
+  levels.refreshObjective();
+
   const pose = params.get('pose');
   if (pose) {
     const [px, pz, pyaw] = pose.split(',').map(Number);
-    if (Number.isFinite(px)) player.position.x = px;
-    if (Number.isFinite(pz)) player.position.z = pz;
+    if (Number.isFinite(px) && Number.isFinite(pz)) player.teleport(px, pz);
     if (Number.isFinite(pyaw)) player.state.yaw = (pyaw * Math.PI) / 180;
-    previousX = player.position.x;
-    previousZ = player.position.z;
   }
-  // dev-only shortcut so the automated test client can reach the end game quickly
-  if (params.get('dev') === '1') {
-    const preset = Number(params.get('cones') || 0);
-    if (preset > 0) {
-      world.pinecones.slice(0, Math.min(preset, TOTAL_CONES)).forEach((cone) => {
-        cone.userData.collected = true;
-        cone.visible = false;
-        collected += 1;
-      });
+  previousX = player.position.x;
+  previousZ = player.position.z;
+
+  // dev-only shortcuts so the automated test client can reach any state quickly
+  if (DEV) {
+    const give = params.get('give');
+    if (give) {
+      for (const pair of give.split(',')) {
+        const [kind, count] = pair.split(':');
+        const want = Number(count) || 0;
+        let taken = 0;
+        for (const item of props.items) {
+          if (taken >= want) break;
+          if (item.userData.kind !== kind || item.userData.collected) continue;
+          item.userData.collected = true;
+          item.visible = false;
+          bag[kind] = (bag[kind] || 0) + 1;
+          taken += 1;
+          levels.onPickup(kind);
+        }
+      }
     }
-    const stage = params.get('stage');
-    if (stage && ['intro', 'bridge', 'fight', 'report', 'cones'].includes(stage)) {
-      quest.applyStage(stage);
-      if (stage === 'fight' || stage === 'report' || stage === 'cones') boss.activate();
+    const lit = Number(params.get('lit') || 0);
+    if (lit > 0) {
+      props.crystals.slice(0, lit).forEach((c) => { c.userData.lit = true; });
+      levels.onCrystalLit();
     }
+    const level = params.get('level');
+    if (level) levels.start(level);
+    if (params.get('intro') === '1') levels.state.introDone = true;
+    ui.setBag(bagCounts());
+    levels.refreshObjective();
   }
+
   setupTouch();
   onResize();
-  ui.setQuest(0, TOTAL_CONES);
   requestAnimationFrame(() => {
     renderer.render(scene, camera);
     ui.showStart();

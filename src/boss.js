@@ -158,15 +158,18 @@ export function createBossFight(scene, tex, world, audio, player, ui) {
     const dx = character.sprite.position.x - px;
     const dz = character.sprite.position.z - pz;
     const distance = Math.hypot(dx, dz);
-    if (distance > player.ATTACK_REACH) return false;
+    const reach = player.currentReach ? player.currentReach() : player.ATTACK_REACH;
+    if (distance > reach) return false;
+    const arc = player.currentArc ? player.currentArc() : player.ATTACK_ARC;
     const facing = (dx / (distance || 1)) * Math.sin(player.state.yaw)
       + (dz / (distance || 1)) * Math.cos(player.state.yaw);
-    if (facing < player.ATTACK_ARC) return false;
+    if (facing < arc) return false;
     return true;
   };
 
   const applyHit = () => {
-    state.hp = Math.max(0, state.hp - HIT_DAMAGE);
+    const damage = player.attackDamage ? player.attackDamage() : HIT_DAMAGE;
+    state.hp = Math.max(0, state.hp - damage);
     state.hits += 1;
     state.flash = 0.32;
     state.staggerTimer = 0.85;
@@ -315,7 +318,8 @@ export function createBossFight(scene, tex, world, audio, player, ui) {
     // a swing in progress has to be able to land; shoving first made the opening hit miss
     if (toPlayer < BOSS_REACH && state.chargeCooldown <= 0 && !dialogueOpen && !player.isAttacking()) {
       state.chargeCooldown = 2.4;
-      player.knockback(sprite.position.x, sprite.position.z, 7.5);
+      if (player.hurt) player.hurt(7, sprite.position.x, sprite.position.z);
+      else player.knockback(sprite.position.x, sprite.position.z, 7.5);
       player.state.stun = 0.32;
       audio.blip(180);
       ui.toast('<b>光头强</b> 推了你一把!', 900);
@@ -335,6 +339,24 @@ export function createBossFight(scene, tex, world, audio, player, ui) {
     return state;
   };
 
+  /** A thrown stone lands near the lumberjack: same effect as a paw, less damage. */
+  const hitNear = (x, z, radius, damage) => {
+    if (state.phase === 'defeated' || state.phase === 'fleeing') return false;
+    const d = Math.hypot(character.sprite.position.x - x, character.sprite.position.z - z);
+    if (d > radius) return false;
+    state.hp = Math.max(0, state.hp - damage);
+    state.hits += 1;
+    state.flash = 0.32;
+    state.staggerTimer = 0.7;
+    setPhase('staggered');
+    burst(character.sprite.position.x, 1.5, character.sprite.position.z, 10, 3);
+    spark.position.set(character.sprite.position.x, 1.6, character.sprite.position.z);
+    sparkLife = 0.3;
+    audio.blip(200);
+    if (state.hp <= 0) defeat();
+    return true;
+  };
+
   return {
     character,
     state,
@@ -343,6 +365,7 @@ export function createBossFight(scene, tex, world, audio, player, ui) {
     reset,
     resolvePunch,
     applyHit,
+    hitNear,
     getTreeHp: () => state.treeHp,
     getHp: () => state.hp,
   };

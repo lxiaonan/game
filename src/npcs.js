@@ -1,26 +1,27 @@
 import * as THREE from '../vendor/three.module.js';
 import { makeBlobShadow } from './assets.js';
+import { groundHeightAt } from './terrain.js';
 
-/** Twelve forest neighbours. Bear two is the player, everybody else lives here. */
+/** Thirteen forest neighbours. Bear two is the player, everybody else lives here. */
 export const NEIGHBOURS = [
   {
     id: 'xiongda', name: '熊大', sprite: 'xiongda', height: 3.2, x: -3, z: -6, home: 5,
     lines: [
       '熊二!你可算醒了,太阳都晒到屁股啦。',
-      '森林里的小松果被风刮得到处都是,你那七颗金松果也吹跑咯。',
-      '帮我把它们找回来吧,找齐了我请你吃蜂蜜!',
+      '光头强在河对岸砍树呢,东边路口立了一块发光的石碑,去看看。',
+      '整片狗熊岭都随你走,想先做哪一关,石碑上挑就行。',
     ],
-    after: ['还差几颗呀?金松果会发光,夜里也看得见。'],
-    done: ['全部找齐啦!你真是我们狗熊岭最棒的熊!'],
+    after: ['别忘了石碑上的关卡,做完了回来跟我说一声。'],
+    done: ['五关全通啦?你真是我们狗熊岭最棒的熊!'],
   },
   {
     id: 'cuihua', name: '翠花', sprite: 'cuihua', height: 3.0, x: -22, z: 10, home: 4,
     lines: [
       '熊二,你又在发呆呀?',
-      '我刚烤好蜂蜜饼,香得很,找完松果记得回家吃饭。',
+      '西南边的沼泽里泡着好几罐野蜂蜜,给我弄回来我做蜂蜜饼。',
     ],
-    after: ['饼还热着呢,快去吧。'],
-    done: ['都找齐啦?来来来,先吃块饼!'],
+    after: ['沼泽水凉,走慢点儿。'],
+    done: ['蜂蜜够啦!来来来,先吃块饼。'],
   },
   {
     id: 'bengbeng', name: '蹦蹦', sprite: 'squirrel', height: 1.25, x: 8, z: 9, home: 5,
@@ -35,7 +36,7 @@ export const NEIGHBOURS = [
     id: 'jiji', name: '吉吉', sprite: 'monkey', height: 1.5, x: -9, z: 14, home: 5,
     lines: [
       '哼,松果都是本大王的!你凭什么捡?',
-      '……好啦好啦,巨石阵那边还有一颗,拿去拿去。',
+      '……好啦好啦,西边巨石阵那边还有一颗,拿去拿去。',
     ],
     after: ['西边的巨石阵,你敢去吗?'],
     done: ['算你厉害,本大王服了。'],
@@ -44,19 +45,28 @@ export const NEIGHBOURS = [
     id: 'tutu', name: '涂涂', sprite: 'owl', height: 1.35, x: 12, z: -3, home: 3,
     lines: [
       '呼……白天我要睡觉,晚上才出门。',
-      '不过我看见风把松果吹到东边的小路上了。',
+      '东边那片高地,一到晚上星星多得吓人,我还看见几块会发光的石头。',
     ],
     after: ['呼……让我再睡会儿。'],
-    done: ['呼……找齐啦?那我可以安心睡觉了。'],
+    done: ['高地都点亮啦?那我晚上有灯了。'],
   },
   {
-    id: 'asong', name: '阿松', sprite: 'squirrel', height: 1.15, x: -30, z: 34, home: 7,
+    id: 'asong', name: '阿松', sprite: 'squirrel', height: 1.15, x: -34, z: 40, home: 7,
     lines: [
       '我是蹦蹦的表弟阿松,我在守着这片林子。',
-      '这附近的松果可多了,仔细找找看。',
+      '往西南走下去就是迷雾沼泽了,小心脚底下。',
     ],
     after: ['小声点儿,别把松鼠吓跑啦。'],
     done: ['你真厉害,比我表哥还能干。'],
+  },
+  {
+    id: 'wage', name: '蛙哥', sprite: 'frog', height: 1.35, x: -96, z: 86, home: 8,
+    lines: [
+      '呱!熊二?好久没见陆地上的熊下来了。',
+      '沼泽里有六罐蜂蜜,蜂巢边上那群蜜蜂可不讲道理,被追着叮别怪我没事先提醒。',
+    ],
+    after: ['呱,水底下滑,慢点儿走。'],
+    done: ['呱呱!六罐都捞上来了?你比我还能潜。'],
   },
   {
     id: 'maomao', name: '毛毛', sprite: 'monkey', height: 1.35, x: 50, z: 46, home: 7,
@@ -71,28 +81,37 @@ export const NEIGHBOURS = [
     id: 'gugu', name: '咕咕长老', sprite: 'owl', height: 1.6, x: -52, z: -30, home: 4,
     lines: [
       '老夫在这片森林里住了三百年。',
-      '巨石阵的石头下面,藏着一颗金松果。',
+      '石圈里那几位想跟你过过招,站进去就得打完三波。',
     ],
     after: ['石头会说话,你要仔细听。'],
-    done: ['七颗归位,森林就安宁了。谢谢你,熊二。'],
+    done: ['五关皆过,森林就安宁了。谢谢你,熊二。'],
   },
   {
-    id: 'huashen', name: '花婶', sprite: 'cuihua', height: 2.9, x: 20, z: -30, home: 6,
+    id: 'huashen', name: '花婶', sprite: 'cuihua', height: 2.9, x: -30, z: -30, home: 6,
     lines: [
       '熊二呀,别光顾着玩,森林也要有人照看。',
-      '我在这儿采蘑菇,顺便帮你看着松果呢。',
+      '东南边那片蘑菇林,夜里会发光,好看得很。',
     ],
     after: ['蘑菇熟了记得来拿。'],
-    done: ['找齐啦?真是个好孩子。'],
+    done: ['五关都过了?真是个好孩子。'],
   },
   {
-    id: 'dahei', name: '大黑叔', sprite: 'xiongda', height: 3.4, x: -14, z: -74, home: 6,
+    id: 'dahei', name: '大黑叔', sprite: 'xiongda', height: 3.4, x: -14, z: -80, home: 6,
     lines: [
       '小崽子,往北走可别迷路咯。',
       '千年大树下面风大,松果最爱滚到那儿。',
     ],
     after: ['小心脚下,别摔着。'],
-    done: ['七颗都齐啦?不愧是熊家的小子。'],
+    done: ['五关都齐啦?不愧是熊家的小子。'],
+  },
+  {
+    id: 'xiaolu', name: '小鹿', sprite: 'deer', height: 2.5, x: 100, z: -96, home: 9,
+    lines: [
+      '你好呀,我是从山那边搬来的小鹿。',
+      '这块高地上的四块晶石一到晚上就灭,你要是路过,帮我把它们点亮好不好?',
+    ],
+    after: ['天一黑,石头不亮我都不敢回家。'],
+    done: ['四块石头全亮啦!整片高地都看得见了。'],
   },
   {
     id: 'laoli', name: '老李', sprite: 'guangtouqiang', height: 2.05, x: 72, z: 32, home: 7,
@@ -101,7 +120,7 @@ export const NEIGHBOURS = [
       '这林子里松鼠比人多,你说话它们都听得懂。',
     ],
     after: ['放心玩,树我替你看着。'],
-    done: ['听说你把金松果都找回来啦?好样的。'],
+    done: ['听说你把五个关卡都过啦?好样的。'],
   },
 ];
 
@@ -152,22 +171,24 @@ export function createCharacter(scene, tex, data) {
   const sprite = new THREE.Sprite(material);
   sprite.center.set(0.5, 0);
   sprite.scale.set(data.height * aspect, data.height, 1);
-  sprite.position.set(data.x, 0, data.z);
+  const groundY = groundHeightAt(data.x, data.z);
+  sprite.position.set(data.x, groundY, data.z);
   scene.add(sprite);
+  sprite.userData.baseScale = { x: data.height * aspect, y: data.height };
 
   const shadow = new THREE.Mesh(
     new THREE.PlaneGeometry(data.height * 0.8, data.height * 0.8),
     new THREE.MeshBasicMaterial({ map: sharedShadow, transparent: true, depthWrite: false }),
   );
   shadow.rotation.x = -Math.PI / 2;
-  shadow.position.set(data.x, 0.035, data.z);
+  shadow.position.set(data.x, groundY + 0.06, data.z);
   scene.add(shadow);
 
   const plate = new THREE.Sprite(new THREE.SpriteMaterial({
     map: nameplate(data.name), transparent: true, opacity: 0, depthWrite: false, fog: true,
   }));
   plate.scale.set(1.55, 0.39, 1);
-  plate.position.set(data.x, data.height + 0.45, data.z);
+  plate.position.set(data.x, groundY + data.height + 0.45, data.z);
   plate.center.set(0.5, 0.5);
   scene.add(plate);
 
@@ -209,7 +230,11 @@ export function syncCharacter(npc, dt, playerPos) {
   const fadeOut = Math.min(1, Math.max(0, (20 - toPlayer) / 6));
   const wantOpacity = fadeIn * fadeOut * 0.92;
   npc.plate.material.opacity += (wantOpacity - npc.plate.material.opacity) * Math.min(1, dt * 6);
-  npc.shadow.position.set(npc.sprite.position.x, 0.035, npc.sprite.position.z);
+  npc.shadow.position.set(
+    npc.sprite.position.x,
+    groundHeightAt(npc.sprite.position.x, npc.sprite.position.z) + 0.06,
+    npc.sprite.position.z,
+  );
   npc.near = toPlayer < 4.2;
   return toPlayer;
 }
@@ -259,7 +284,8 @@ export function buildNeighbours(scene, tex) {
       const breathe = 1 + Math.sin(npc.bob) * (moving ? 0.03 : 0.012);
       const aspect = npc.sprite.scale.x / npc.sprite.scale.y;
       npc.sprite.scale.set(base * aspect * breathe, base * breathe, 1);
-      npc.sprite.position.y = moving ? Math.abs(Math.sin(npc.bob)) * 0.09 : 0;
+      const groundY = groundHeightAt(npc.sprite.position.x, npc.sprite.position.z);
+      npc.sprite.position.y = groundY + (moving ? Math.abs(Math.sin(npc.bob)) * 0.09 : 0);
 
       syncCharacter(npc, dt, playerPos);
     }

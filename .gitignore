@@ -20,3 +20,10 @@ assets/raw/
 
 # 本地启动日志
 gen2.log
+
+# 别的会话把两个完全无关的项目丢进了这个目录(一个是 777MB 的 hypit-demo,
+# 里面还塞着 ffmpeg.exe / uv.exe / npm 缓存和一个内嵌 git 仓库;另一个是
+# pelican-on-a-bike)。它们不是《熊二的世界》的一部分,而 推送到GitHub.bat
+# 用的是 `git add -A` —— 不挡掉就会把这几百兆一起提交,GitHub 直接拒收。
+hypit-demo/
+pelican-on-a-bike/

@@ -18,7 +18,7 @@ def main():
         image = pp.fit(image, max_edge)
     else:
         image = pp.fit(pp.make_tileable(image.convert("RGB"), axes or "x"), max_edge)
-    dst = os.path.join(pp.TEX, name + ".png")
+    dst = os.path.join(pp.TEX, pp.RENAME.get(name, name) + ".png")
     image.save(dst, optimize=True)
     print(name, image.size, image.mode, round(os.path.getsize(dst) / 1024.0, 1), "KB")
 

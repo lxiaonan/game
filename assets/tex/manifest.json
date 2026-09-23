@@ -1,39 +1,39 @@
 {
   "sky_pano": {
-    "w": 1536,
-    "h": 1024,
+    "w": 1024,
+    "h": 683,
     "mode": "RGB",
-    "kb": 1929.7
+    "kb": 949.4
   },
   "ground_grass": {
-    "w": 1024,
-    "h": 1024,
+    "w": 512,
+    "h": 512,
     "mode": "RGB",
-    "kb": 2474.0
+    "kb": 643.6
   },
   "ground_dirt": {
-    "w": 1024,
-    "h": 1024,
+    "w": 512,
+    "h": 512,
     "mode": "RGB",
-    "kb": 2390.3
+    "kb": 613.4
   },
   "water_river": {
-    "w": 1024,
-    "h": 1024,
+    "w": 512,
+    "h": 512,
     "mode": "RGB",
-    "kb": 1748.9
+    "kb": 512.2
   },
   "tex_bark": {
-    "w": 1024,
-    "h": 1024,
+    "w": 512,
+    "h": 512,
     "mode": "RGB",
-    "kb": 2298.4
+    "kb": 586.5
   },
   "tex_cliff": {
-    "w": 1024,
-    "h": 1024,
+    "w": 512,
+    "h": 512,
     "mode": "RGB",
-    "kb": 2280.2
+    "kb": 588.4
   },
   "tree_pine": {
     "w": 473,
@@ -132,15 +132,123 @@
     "kb": 786.7
   },
   "portrait_xionger": {
-    "w": 495,
+    "w": 442,
     "h": 512,
     "mode": "RGBA",
-    "kb": 440.1
+    "kb": 421.0
   },
   "hands_xionger": {
     "w": 250,
     "h": 285,
     "mode": "RGBA",
     "kb": 141.8
+  },
+  "tree_dead": {
+    "w": 436,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 307.3
+  },
+  "ground_swamp": {
+    "w": 512,
+    "h": 512,
+    "mode": "RGB",
+    "kb": 588.5
+  },
+  "tex_stone": {
+    "w": 512,
+    "h": 512,
+    "mode": "RGB",
+    "kb": 626.1
+  },
+  "prop_mushroom": {
+    "w": 710,
+    "h": 768,
+    "mode": "RGBA",
+    "kb": 674.2
+  },
+  "prop_beehive": {
+    "w": 542,
+    "h": 640,
+    "mode": "RGBA",
+    "kb": 393.2
+  },
+  "prop_totem": {
+    "w": 310,
+    "h": 768,
+    "mode": "RGBA",
+    "kb": 387.5
+  },
+  "prop_crystal": {
+    "w": 380,
+    "h": 640,
+    "mode": "RGBA",
+    "kb": 335.3
+  },
+  "prop_gate": {
+    "w": 1024,
+    "h": 939,
+    "mode": "RGBA",
+    "kb": 905.4
+  },
+  "item_honey": {
+    "w": 190,
+    "h": 256,
+    "mode": "RGBA",
+    "kb": 73.6
+  },
+  "item_shroom": {
+    "w": 236,
+    "h": 256,
+    "mode": "RGBA",
+    "kb": 59.1
+  },
+  "sky_dusk": {
+    "w": 1024,
+    "h": 683,
+    "mode": "RGB",
+    "kb": 740.9
+  },
+  "char_frog": {
+    "w": 615,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 815.1
+  },
+  "char_deer": {
+    "w": 509,
+    "h": 1024,
+    "mode": "RGBA",
+    "kb": 620.7
+  },
+  "prop_grass_tuft": {
+    "w": 321,
+    "h": 384,
+    "mode": "RGBA",
+    "kb": 178.1
+  },
+  "prop_fern": {
+    "w": 384,
+    "h": 226,
+    "mode": "RGBA",
+    "kb": 104.3
+  },
+  "prop_small_rock": {
+    "w": 256,
+    "h": 179,
+    "mode": "RGBA",
+    "kb": 101.1
+  },
+  "hand_left": {
+    "w": 464,
+    "h": 512,
+    "mode": "RGBA",
+    "kb": 355.7
+  },
+  "hand_right": {
+    "w": 466,
+    "h": 512,
+    "mode": "RGBA",
+    "kb": 353.0
   }
 }
